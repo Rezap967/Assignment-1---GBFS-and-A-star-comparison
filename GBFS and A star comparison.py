@@ -1,128 +1,112 @@
+# maze_gbfs_astar.py
 import heapq
+import random
 import time
 
-grid_str = [
-    "S..#......",
-    ".#.#.####.",
-    ".#......#.",
-    ".#####..#.",
-    ".....#..#G",
-    "####.#..##",
-    "...#.#....",
-    ".#.#.####.",
-    ".#........",
-    "....#####."
-]
+class Node:
+    def __init__(self, position, parent=None, g=0, h=0):
+        self.position = position
+        self.parent = parent
+        self.g = g  # Cost from start to current
+        self.h = h  # Heuristic
+        self.f = g + h
 
-# Parse grid
-grid = [list(row) for row in grid_str]
-rows, cols = len(grid), len(grid[0])
+    def __lt__(self, other):
+        return self.f < other.f
 
-# Find start and goal
-start = goal = None
-for r in range(rows):
-    for c in range(cols):
-        if grid[r][c] == 'S':
-            start = (r, c)
-        elif grid[r][c] == 'G':
-            goal = (r, c)
-
-# Heuristic: Manhattan
 def manhattan(p1, p2):
     return abs(p1[0] - p2[0]) + abs(p1[1] - p2[1])
 
-# Neighbors
-def neighbors(pos):
-    r, c = pos
-    for dr, dc in [(-1,0),(1,0),(0,-1),(0,1)]:
-        nr, nc = r + dr, c + dc
-        if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] != '#':
-            yield (nr, nc)
+def generate_grid(size, num_obstacles):
+    grid = [['.' for _ in range(size)] for _ in range(size)]
+    start = (0, 0)
+    goal = (size - 1, size - 1)
+    grid[start[0]][start[1]] = 'S'
+    grid[goal[0]][goal[1]] = 'G'
 
-# Path reconstruction
-def reconstruct(came_from, current):
+    count = 0
+    while count < num_obstacles:
+        x, y = random.randint(0, size - 1), random.randint(0, size - 1)
+        if (x, y) != start and (x, y) != goal and grid[x][y] == '.':
+            grid[x][y] = '#'
+            count += 1
+    return grid, start, goal
+
+def get_neighbors(pos, grid):
+    neighbors = []
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    for dx, dy in directions:
+        nx, ny = pos[0] + dx, pos[1] + dy
+        if 0 <= nx < len(grid) and 0 <= ny < len(grid[0]) and grid[nx][ny] != '#':
+            neighbors.append((nx, ny))
+    return neighbors
+
+def reconstruct_path(node):
     path = []
-    while current in came_from:
-        path.append(current)
-        current = came_from[current]
+    while node:
+        path.append(node.position)
+        node = node.parent
     return path[::-1]
 
-# GBFS implementation
-def gbfs(start, goal):
-    frontier = [(manhattan(start, goal), start)]
-    came_from = {}
+def gbfs(grid, start, goal):
+    open_set = []
+    heapq.heappush(open_set, (manhattan(start, goal), Node(start)))
     visited = set()
     nodes_explored = 0
 
-    while frontier:
-        _, current = heapq.heappop(frontier)
+    while open_set:
+        _, current = heapq.heappop(open_set)
         nodes_explored += 1
+        if current.position == goal:
+            return reconstruct_path(current), nodes_explored
 
-        if current == goal:
-            return reconstruct(came_from, current), nodes_explored
-
-        visited.add(current)
-        for neighbor in neighbors(current):
+        visited.add(current.position)
+        for neighbor in get_neighbors(current.position, grid):
             if neighbor not in visited:
-                heapq.heappush(frontier, (manhattan(neighbor, goal), neighbor))
-                if neighbor not in came_from:
-                    came_from[neighbor] = current
+                h = manhattan(neighbor, goal)
+                heapq.heappush(open_set, (h, Node(neighbor, current, 0, h)))
 
-    return [], nodes_explored
+    return None, nodes_explored
 
-# A* implementation
-def astar(start, goal):
-    frontier = [(manhattan(start, goal), 0, start)]
-    came_from = {}
-    cost_so_far = {start: 0}
+def astar(grid, start, goal):
+    open_set = []
+    heapq.heappush(open_set, Node(start, None, 0, manhattan(start, goal)))
+    visited = set()
     nodes_explored = 0
 
-    while frontier:
-        _, g, current = heapq.heappop(frontier)
+    while open_set:
+        current = heapq.heappop(open_set)
         nodes_explored += 1
 
-        if current == goal:
-            return reconstruct(came_from, current), nodes_explored
+        if current.position == goal:
+            return reconstruct_path(current), nodes_explored
 
-        for neighbor in neighbors(current):
-            new_cost = g + 1
-            if neighbor not in cost_so_far or new_cost < cost_so_far[neighbor]:
-                cost_so_far[neighbor] = new_cost
-                priority = new_cost + manhattan(neighbor, goal)
-                heapq.heappush(frontier, (priority, new_cost, neighbor))
-                came_from[neighbor] = current
+        visited.add(current.position)
+        for neighbor in get_neighbors(current.position, grid):
+            if neighbor not in visited:
+                g = current.g + 1
+                h = manhattan(neighbor, goal)
+                heapq.heappush(open_set, Node(neighbor, current, g, h))
 
-    return [], nodes_explored
+    return None, nodes_explored
 
-# Run and compare
-start_time = time.time()
-path_gbfs, nodes_gbfs = gbfs(start, goal)
-time_gbfs = (time.time() - start_time) * 1000
+def run_experiments():
+    sizes = [71, 224, 707, 2236, 7071]  # sqrt of number of nodes: 5000 - 50,000,000
+    obstacles = [10, 100, 1000, 10000, 100000]
 
-start_time = time.time()
-path_astar, nodes_astar = astar(start, goal)
-time_astar = (time.time() - start_time) * 1000
+    print("Experiment\tTime GBFS\tTime A*\tLength GBFS\tLength A*\tNodes GBFS\tNodes A*")
+    for i in range(5):
+        grid, start, goal = generate_grid(sizes[i], obstacles[i])
 
-# Visualization
-def print_path(path):
-    path_set = set(path)
-    for r in range(rows):
-        line = ''
-        for c in range(cols):
-            if (r, c) == start:
-                line += 'S'
-            elif (r, c) == goal:
-                line += 'G'
-            elif (r, c) in path_set:
-                line += '*'
-            else:
-                line += grid[r][c]
-        print(line)
+        start_time = time.time()
+        path_gbfs, nodes_gbfs = gbfs(grid, start, goal)
+        time_gbfs = (time.time() - start_time) * 1000
 
-print("GBFS Path:")
-print_path(path_gbfs)
-print(f"Path length: {len(path_gbfs)} | Nodes explored: {nodes_gbfs} | Time: {time_gbfs:.2f}ms\n")
+        start_time = time.time()
+        path_astar, nodes_astar = astar(grid, start, goal)
+        time_astar = (time.time() - start_time) * 1000
 
-print("A* Path:")
-print_path(path_astar)
-print(f"Path length: {len(path_astar)} | Nodes explored: {nodes_astar} | Time: {time_astar:.2f}ms")
+        print(f"#{i+1}\t{int(time_gbfs)} ms\t{int(time_astar)} ms\t{len(path_gbfs) if path_gbfs else 0}\t\t{len(path_astar) if path_astar else 0}\t\t{nodes_gbfs}\t\t{nodes_astar}")
+
+if __name__ == "__main__":
+    run_experiments()
